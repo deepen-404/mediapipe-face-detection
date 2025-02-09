@@ -139,10 +139,13 @@ const FaceDetection: React.FC<FaceDetectionProps> = ({
   }, [width, height, maxFaces, minDetectionConfidence, minTrackingConfidence]);
 
   return (
-    <div className="relative" style={{ width, height }}>
+    <div
+      className="relative m-auto max-h-screen mt-20"
+      style={{ width, height }}
+    >
       <video
         ref={videoRef}
-        className="absolute top-0 left-0 w-full h-full"
+        className="absolute top-1/2 left-1/2 translate-x-[-50%] translate-y-[-50%] w-full h-full"
         playsInline
         style={{ display: 'none' }}
       />
