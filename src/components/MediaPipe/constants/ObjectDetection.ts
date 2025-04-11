@@ -8,11 +8,4 @@ export const OBJECT_DETECTION_DEFAULT_CONFIG = {
     'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
 } as const;
 
-export const COCO_CLASSES = [
-  'cell phone',
-  'laptop',
-  'remote',
-  'book',
-  'tv',
-  'person',
-] as const;
+export const COCO_CLASSES = ['cell phone', 'laptop', 'book'] as const;
