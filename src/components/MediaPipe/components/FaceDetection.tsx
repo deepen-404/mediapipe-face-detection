@@ -1,4 +1,3 @@
-import React from 'react';
 import { FACE_DETECTION_DEFAULT_CONFIG } from '../constants/FaceDetection';
 import { useMediaPipeFaceDetection } from '../hooks/useMediaPipeFaceDetection';
 import { Loader } from 'lucide-react';

@@ -1,6 +1,6 @@
 import { Results, NormalizedLandmark } from '@mediapipe/face_mesh';
 import { FACE_DETECTION_KEY_POINTS } from '../constants/FaceDetection';
-import { FaceDetectionStats } from '../types/MediaPipe.types';
+import { FaceDetectionStats } from '../types/FaceDetection.types';
 
 function drawLandmarks(
   ctx: CanvasRenderingContext2D,

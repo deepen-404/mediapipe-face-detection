@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaceDetectionStats } from '../types/MediaPipe.types';
+import { FaceDetectionStats } from '../types/FaceDetection.types';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
-import { onResults } from '../utils/MediaPipeHelpers';
+import { onResults } from '../utils/FaceDetectionHelpers';
 
 export function useMediaPipeFaceDetection({
   maxFaces,
