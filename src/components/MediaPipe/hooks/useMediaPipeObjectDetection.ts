@@ -1,10 +1,7 @@
 // hooks/useMediaPipeObjectDetection.ts
 import { useEffect, useRef, useState } from 'react';
 import { ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
-import {
-  ObjectDetectionResult,
-  ObjectDetectionStats,
-} from '../types/ObjectDetection.types';
+import { ObjectDetectionResult, ObjectDetectionStats } from '../types/ObjectDetection.types';
 
 export function useMediaPipeObjectDetection({
   width,
@@ -29,15 +26,9 @@ export function useMediaPipeObjectDetection({
   const objectDetectorRef = useRef<ObjectDetector | null>(null);
   const lastVideoTimeRef = useRef<number>(-1);
   const animationFrameRef = useRef<number>(0);
+  const predictionActiveRef = useRef<boolean>(false);
 
-  // console.log('value of stats: ', stats);
-  // console.log('value of webcamEnabled: ', webcamEnabled);
-  // console.log('value of videoRef: ', videoRef);
-  // console.log('value of canvasRef: ', canvasRef);
-  // console.log('value of objectDetectorRef: ', objectDetectorRef);
-  // console.log('value of lastVideoTimeRef: ', lastVideoTimeRef);
-  // console.log('value of animationFrameRef: ', animationFrameRef);
-
+  // Initialize the object detector
   useEffect(() => {
     const initializeDetector = async () => {
       try {
@@ -68,30 +59,56 @@ export function useMediaPipeObjectDetection({
     initializeDetector();
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      stopPrediction();
       if (objectDetectorRef.current) {
         objectDetectorRef.current.close();
       }
     };
   }, [modelAssetPath, delegate, scoreThreshold, maxResults]);
 
+  const stopPrediction = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = 0;
+    }
+    predictionActiveRef.current = false;
+  };
+
+  const startPrediction = () => {
+    if (!predictionActiveRef.current) {
+      predictionActiveRef.current = true;
+      predictWebcam();
+    }
+  };
+
   // Handle webcam enabling
   const enableWebcam = async () => {
-    if (!objectDetectorRef.current) return;
-
-    console.log('enable web cam running');
+    if (!objectDetectorRef.current) {
+      console.error('Object detector not initialized');
+      return;
+    }
 
     try {
+      // Add event listener BEFORE setting the source
+      if (videoRef.current) {
+        videoRef.current.addEventListener('loadeddata', () => {
+          startPrediction();
+        });
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width, height },
+        video: {
+          width: { ideal: width },
+          height: { ideal: height },
+          facingMode: 'user',
+        },
       });
 
-      console.log('value of video ref: ', videoRef?.current);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.addEventListener('loadeddata', predictWebcam);
+        videoRef.current
+          .play()
+          .catch((e) => console.error('Video play failed:', e));
         setWebcamEnabled(true);
       }
     } catch (error) {
@@ -100,22 +117,31 @@ export function useMediaPipeObjectDetection({
   };
 
   const predictWebcam = () => {
-    if (!videoRef.current || !objectDetectorRef.current || !webcamEnabled)
+    if (!predictionActiveRef.current) return;
+
+    const video = videoRef.current;
+    const detector = objectDetectorRef.current;
+
+    if (
+      !video ||
+      !detector ||
+      video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA
+    ) {
+      animationFrameRef.current = requestAnimationFrame(predictWebcam);
       return;
+    }
 
     const startTimeMs = performance.now();
 
-    if (videoRef.current.currentTime !== lastVideoTimeRef.current) {
-      lastVideoTimeRef.current = videoRef.current.currentTime;
-      const detections = objectDetectorRef.current.detectForVideo(
-        videoRef.current,
-        startTimeMs
-      );
+    if (video.currentTime !== lastVideoTimeRef.current) {
+      lastVideoTimeRef.current = video.currentTime;
 
-      console.log('predict running');
-      console.log('value of detections: ', detections);
-
-      updateDetections(detections);
+      try {
+        const detections = detector.detectForVideo(video, startTimeMs);
+        updateDetections(detections);
+      } catch (error) {
+        console.error('Detection error:', error);
+      }
     }
 
     animationFrameRef.current = requestAnimationFrame(predictWebcam);
@@ -125,11 +151,24 @@ export function useMediaPipeObjectDetection({
   const updateDetections = (result: ObjectDetectionResult) => {
     if (!result.detections) return;
 
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    // Update canvas dimensions to match video
+    if (
+      canvas.width !== video.videoWidth ||
+      canvas.height !== video.videoHeight
+    ) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
     const stats: ObjectDetectionStats = {
       objectsDetected: result.detections.length,
       detections: result.detections.map((detection) => ({
-        category: detection.categories[0].categoryName,
-        score: detection.categories[0].score,
+        category: detection.categories[0]?.categoryName || 'unknown',
+        score: detection.categories[0]?.score || 0,
         boundingBox: {
           originX: detection.boundingBox?.originX || 0,
           originY: detection.boundingBox?.originY || 0,
@@ -157,37 +196,27 @@ export function useMediaPipeObjectDetection({
 
     if (result.detections) {
       for (const detection of result.detections) {
+        if (!detection.boundingBox) continue;
+
+        const { originX, originY, width, height } = detection.boundingBox;
+        const category = detection.categories[0]?.categoryName || 'unknown';
+        const score = detection.categories[0]?.score || 0;
+
         // Draw bounding box
         ctx.strokeStyle = '#00FF00';
         ctx.lineWidth = 2;
-        ctx.strokeRect(
-          detection.boundingBox?.originX || 0,
-          detection.boundingBox?.originY || 0,
-          detection.boundingBox?.width || 0,
-          detection.boundingBox?.height || 0
-        );
+        ctx.strokeRect(originX, originY, width, height);
 
         // Draw label background
         ctx.fillStyle = '#00FF00';
-        const text = `${detection.categories[0].categoryName} (${Math.round(
-          detection.categories[0].score * 100
-        )}%)`;
+        const text = `${category} (${Math.round(score * 100)}%)`;
         const textWidth = ctx.measureText(text).width;
-        ctx.fillRect(
-          detection.boundingBox?.originX || 0,
-          detection.boundingBox?.originY || 0 - 20,
-          textWidth + 10,
-          20
-        );
+        ctx.fillRect(originX, originY - 20, textWidth + 10, 20);
 
         // Draw label text
         ctx.fillStyle = '#000000';
         ctx.font = '14px Arial';
-        ctx.fillText(
-          text,
-          detection.boundingBox?.originX || 0 + 5,
-          detection.boundingBox?.originY || 0 - 5
-        );
+        ctx.fillText(text, originX + 5, originY - 5);
       }
     }
   };
