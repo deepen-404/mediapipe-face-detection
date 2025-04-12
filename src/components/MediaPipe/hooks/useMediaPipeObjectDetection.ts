@@ -1,10 +1,8 @@
 // hooks/useMediaPipeObjectDetection.ts
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, RefObject } from 'react';
 import { ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
-import {
-  ObjectDetectionResult,
-  ObjectDetectionStats,
-} from '../types/ObjectDetection.types';
+import { ObjectDetectionStats } from '../types/ObjectDetection.types';
+import { drawDetections } from '../utils/ObjectionDetectionHelpers';
 
 export function useMediaPipeObjectDetection({
   width,
@@ -13,6 +11,10 @@ export function useMediaPipeObjectDetection({
   maxResults,
   delegate,
   modelAssetPath,
+  videoRef,
+  canvasRef,
+  enabled = true,
+  isSharedCanvas = false,
 }: {
   width: number;
   height: number;
@@ -20,11 +22,13 @@ export function useMediaPipeObjectDetection({
   maxResults: number;
   delegate: 'CPU' | 'GPU';
   modelAssetPath: string;
+  videoRef: RefObject<HTMLVideoElement | null>;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  enabled?: boolean;
+  isSharedCanvas?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<ObjectDetectionStats | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const objectDetectorRef = useRef<ObjectDetector | null>(null);
   const lastVideoTimeRef = useRef<number>(-1);
   const animationFrameRef = useRef<number>(0);
@@ -32,6 +36,8 @@ export function useMediaPipeObjectDetection({
 
   // Initialize the object detector and webcam
   useEffect(() => {
+    if (!enabled) return;
+
     const startPrediction = () => {
       if (!predictionActiveRef.current) {
         predictionActiveRef.current = true;
@@ -61,87 +67,19 @@ export function useMediaPipeObjectDetection({
 
         try {
           const detections = detector.detectForVideo(video, startTimeMs);
-          updateDetections(detections);
+          drawDetections(
+            detections,
+            canvasRef,
+            videoRef,
+            setStats,
+            isSharedCanvas
+          );
         } catch (error) {
           console.error('Detection error:', error);
         }
       }
 
       animationFrameRef.current = requestAnimationFrame(predictWebcam);
-    };
-
-    // Update detections and stats
-    const updateDetections = (result: ObjectDetectionResult) => {
-      if (!result.detections) return;
-
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      if (!canvas || !video) return;
-
-      // Update canvas dimensions to match video
-      if (
-        canvas.width !== video.videoWidth ||
-        canvas.height !== video.videoHeight
-      ) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-
-      const stats: ObjectDetectionStats = {
-        objectsDetected: result.detections.length,
-        detections: result.detections.map((detection) => ({
-          category: detection.categories[0]?.categoryName || 'unknown',
-          score: detection.categories[0]?.score || 0,
-          boundingBox: {
-            originX: detection.boundingBox?.originX || 0,
-            originY: detection.boundingBox?.originY || 0,
-            width: detection.boundingBox?.width || 0,
-            height: detection.boundingBox?.height || 0,
-          },
-        })),
-      };
-
-      setStats(stats);
-      drawDetections(result);
-    };
-
-    // Draw detections on canvas
-    const drawDetections = (result: ObjectDetectionResult) => {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      if (!canvas || !video) return;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      if (result.detections) {
-        for (const detection of result.detections) {
-          if (!detection.boundingBox) continue;
-
-          const { originX, originY, width, height } = detection.boundingBox;
-          const category = detection.categories[0]?.categoryName || 'unknown';
-          const score = detection.categories[0]?.score || 0;
-
-          // Draw bounding box
-          ctx.strokeStyle = '#00FF00';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(originX, originY, width, height);
-
-          // Draw label background
-          ctx.fillStyle = '#00FF00';
-          const text = `${category} (${Math.round(score * 100)}%)`;
-          const textWidth = ctx.measureText(text).width;
-          ctx.fillRect(originX, originY - 20, textWidth + 10, 20);
-
-          // Draw label text
-          ctx.fillStyle = '#000000';
-          ctx.font = '14px Arial';
-          ctx.fillText(text, originX + 5, originY - 5);
-        }
-      }
     };
 
     const initialize = async () => {
@@ -164,25 +102,14 @@ export function useMediaPipeObjectDetection({
           }
         );
 
-        // Initialize webcam
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: width },
-              height: { ideal: height },
-              facingMode: 'user',
-            },
-          });
-
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.addEventListener('loadeddata', () => {
-              startPrediction();
-            });
-            await videoRef.current.play();
+        // Since we're using the video from parent, just start prediction
+        // when video is playing and has data
+        if (videoRef.current) {
+          if (videoRef.current.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            startPrediction();
+          } else {
+            videoRef.current.addEventListener('loadeddata', startPrediction);
           }
-        } catch (error) {
-          console.error('Error enabling webcam:', error);
         }
 
         setLoading(false);
@@ -199,12 +126,20 @@ export function useMediaPipeObjectDetection({
       if (objectDetectorRef.current) {
         objectDetectorRef.current.close();
       }
-      if (videoRef.current?.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-        tracks.forEach((track) => track.stop());
+      if (videoRef.current) {
+        videoRef.current.removeEventListener('loadeddata', startPrediction);
       }
     };
-  }, [modelAssetPath, delegate, scoreThreshold, maxResults, width, height]);
+  }, [
+    modelAssetPath,
+    delegate,
+    scoreThreshold,
+    maxResults,
+    width,
+    height,
+    enabled,
+    isSharedCanvas,
+  ]);
 
   const stopPrediction = () => {
     if (animationFrameRef.current) {
@@ -217,7 +152,5 @@ export function useMediaPipeObjectDetection({
   return {
     loading,
     stats,
-    videoRef,
-    canvasRef,
   };
 }

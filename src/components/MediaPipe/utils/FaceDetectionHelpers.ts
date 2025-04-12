@@ -1,4 +1,6 @@
+// utils/FaceDetectionHelpers.ts
 import { Results, NormalizedLandmark } from '@mediapipe/face_mesh';
+import { RefObject } from 'react';
 import { FACE_DETECTION_KEY_POINTS } from '../constants/FaceDetection';
 import { FaceDetectionStats } from '../types/FaceDetection.types';
 
@@ -41,8 +43,9 @@ const calculateHeadAngle = (landmarks: NormalizedLandmark[]): number => {
 
 export function onResults(
   results: Results,
-  canvasRef: React.RefObject<HTMLCanvasElement | null>,
-  setStats: React.Dispatch<React.SetStateAction<FaceDetectionStats | null>>
+  canvasRef: RefObject<HTMLCanvasElement | null>,
+  setStats: React.Dispatch<React.SetStateAction<FaceDetectionStats | null>>,
+  isSharedCanvas: boolean = false
 ): void {
   const canvas = canvasRef.current;
   if (!canvas) return;
@@ -50,11 +53,15 @@ export function onResults(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+  // If we're in shared canvas mode, don't clear or redraw the video
+  // Otherwise, perform the standard clearing and video drawing
+  if (!isSharedCanvas) {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+  }
 
-  if (results.multiFaceLandmarks) {
+  if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
     const activeFaces = results.multiFaceLandmarks.length;
 
     results.multiFaceLandmarks.forEach((landmarks) => {
@@ -62,46 +69,12 @@ export function onResults(
       const headAngle = calculateHeadAngle(landmarks);
       updateStats({ facesDetected: activeFaces, headAngle }, setStats);
     });
+  } else {
+    // Update with zero faces when none are detected
+    updateStats({ facesDetected: 0, headAngle: 0 }, setStats);
   }
 
-  ctx.restore();
-}
-
-export async function locateFile(file: string): Promise<string> {
-  if ('showDirectoryPicker' in window) {
-    try {
-      const opfsRoot = await navigator.storage.getDirectory();
-      const faceMeshDir = await opfsRoot.getDirectoryHandle('face_mesh', {
-        create: true,
-      });
-
-      try {
-        // Check if file exists in OPFS
-        const fileHandle = await faceMeshDir.getFileHandle(file);
-        const fileObject = await fileHandle.getFile();
-        return URL.createObjectURL(fileObject);
-      } catch (error) {
-        console.error('File not found in OPFS:', error);
-
-        // If file does not exist, download and store it
-        const response = await fetch(
-          `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-        );
-        if (!response.ok) throw new Error(`Failed to download ${file}`);
-
-        const writableFile = await faceMeshDir.getFileHandle(file, {
-          create: true,
-        });
-        const writableStream = await writableFile.createWritable();
-        await response.body?.pipeTo(writableStream);
-
-        console.log(`Saved ${file} to OPFS`);
-        return URL.createObjectURL(await writableFile.getFile());
-      }
-    } catch (error) {
-      console.error('Error accessing OPFS:', error);
-    }
+  if (!isSharedCanvas) {
+    ctx.restore();
   }
-  // Fallback to CDN if OPFS is not available
-  return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
 }

@@ -1,10 +1,8 @@
 import './App.css';
-import FaceDetection from './components/MediaPipe/components/FaceDetection';
-import ObjectDetection from './components/MediaPipe/components/ObjectDetection';
+import UnifiedDetection from './components/MediaPipe/components/UnifiedDetection';
 
 function App() {
-  return <ObjectDetection />;
-  return <FaceDetection />;
+  return <UnifiedDetection />;
 }
 
 export default App;

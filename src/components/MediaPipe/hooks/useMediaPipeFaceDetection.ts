@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+// hooks/useMediaPipeFaceDetection.ts
+import { useEffect, useState, RefObject } from 'react';
 import { FaceDetectionStats } from '../types/FaceDetection.types';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
@@ -10,68 +11,87 @@ export function useMediaPipeFaceDetection({
   minTrackingConfidence,
   width,
   height,
+  videoRef,
+  canvasRef,
+  enabled = true,
+  isSharedCanvas = false,
 }: {
   maxFaces: number;
   minDetectionConfidence: number;
   minTrackingConfidence: number;
   width: number;
   height: number;
+  videoRef: RefObject<HTMLVideoElement | null>;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  enabled?: boolean;
+  isSharedCanvas?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<FaceDetectionStats | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cameraRef = useRef<Camera | null>(null);
-  const faceMeshRef = useRef<FaceMesh | null>(null);
+  const [camera, setCamera] = useState<Camera | null>(null);
+  const [faceMesh, setFaceMesh] = useState<FaceMesh | null>(null);
 
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !enabled) return;
 
     setLoading(true);
 
-    faceMeshRef.current = new FaceMesh({
+    // Initialize FaceMesh
+    const faceMeshInstance = new FaceMesh({
       locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
       },
     });
 
-    const faceMesh = faceMeshRef.current;
-    faceMesh.setOptions({
+    faceMeshInstance.setOptions({
       maxNumFaces: maxFaces,
       minDetectionConfidence,
       minTrackingConfidence,
       refineLandmarks: false,
     });
 
-    faceMesh.onResults((results) => {
-      onResults(results, canvasRef, setStats);
+    faceMeshInstance.onResults((results) => {
+      // Pass the shared canvas flag to onResults
+      onResults(results, canvasRef, setStats, isSharedCanvas);
       setLoading(false);
     });
 
-    cameraRef.current = new Camera(videoRef.current, {
+    setFaceMesh(faceMeshInstance);
+
+    // Initialize Camera
+    const cameraInstance = new Camera(videoRef.current, {
       onFrame: async () => {
-        if (videoRef.current && faceMesh) {
-          await faceMesh.send({ image: videoRef.current });
+        if (videoRef.current && faceMeshInstance) {
+          await faceMeshInstance.send({ image: videoRef.current });
         }
       },
       width,
       height,
     });
 
-    cameraRef.current.start();
+    cameraInstance.start();
+    setCamera(cameraInstance);
 
     return () => {
-      cameraRef.current?.stop();
-      faceMeshRef.current?.close();
+      cameraInstance?.stop();
+      faceMeshInstance?.close();
     };
-  }, [width, height, maxFaces, minDetectionConfidence, minTrackingConfidence]);
+  }, [
+    videoRef,
+    canvasRef,
+    width,
+    height,
+    maxFaces,
+    minDetectionConfidence,
+    minTrackingConfidence,
+    enabled,
+    isSharedCanvas,
+  ]);
 
   return {
     loading,
     stats,
-    videoRef,
-    canvasRef,
-    cameraRef,
-    faceMeshRef,
+    camera,
+    faceMesh,
   };
 }
